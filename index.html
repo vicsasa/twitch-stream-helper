@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Twitch配信アシスタント</title>
+<style>
+  :root{
+    --bg:#15161b; --panel:#1e2028; --border:#30333d; --text:#e8e9ed;
+    --muted:#9199a8; --accent:#9146ff; --accent2:#6ee7b7; --danger:#f87171;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;}
+  body{background:transparent;color:var(--text);}
+  body{font-family:"Segoe UI","Hiragino Sans",sans-serif;font-size:14px;}
+  body.chrome-visible{background:var(--bg);}
+  #overlay{position:fixed;inset:0;pointer-events:none;display:flex;align-items:flex-start;justify-content:center;z-index:50;}
+  #overlay-card{margin-top:6vh;padding:22px 40px;border-radius:16px;background:rgba(20,20,26,.88);
+    border:2px solid var(--accent);box-shadow:0 8px 40px rgba(0,0,0,.5);
+    font-size:28px;font-weight:700;text-align:center;opacity:0;transform:translateY(-16px) scale(.96);
+    transition:opacity .25s ease,transform .25s ease;max-width:80vw;}
+  #overlay-card.show{opacity:1;transform:translateY(0) scale(1);}
+  #overlay-card .sub{display:block;margin-top:6px;font-size:15px;font-weight:400;color:var(--accent2);}
+
+  #panel{position:relative;z-index:10;max-width:720px;margin:0 auto;padding:16px;display:none;}
+  body.chrome-visible #panel{display:block;}
+  #toggleChrome{position:fixed;top:8px;right:8px;z-index:100;width:30px;height:30px;border-radius:8px;
+    border:1px solid var(--border);background:var(--panel);color:var(--muted);cursor:pointer;font-size:14px;}
+
+  h1{font-size:17px;margin:4px 0 14px;}
+  h2{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:22px 0 8px;border-bottom:1px solid var(--border);padding-bottom:6px;}
+  section{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:12px;}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;}
+  input[type=text],input[type=number],input[type=password],select,textarea{
+    width:100%;padding:7px 9px;border-radius:7px;border:1px solid var(--border);
+    background-color:#0f1014;color:var(--text);font-size:13px;}
+  input[type=file]{color:var(--muted);font-size:12px;}
+  button{cursor:pointer;border-radius:8px;border:1px solid var(--border);background:#2a2d38;color:var(--text);
+    padding:7px 12px;font-size:13px;}
+  button:hover{background:#343845;}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  button.primary:hover{background:#7d3bf0;}
+  button.danger{background:transparent;border-color:var(--danger);color:var(--danger);}
+  button.small{padding:4px 8px;font-size:12px;}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .status{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 9px;border-radius:999px;background:#0f1014;border:1px solid var(--border);}
+  .dot{width:8px;height:8px;border-radius:50%;background:#555;}
+  .dot.ok{background:var(--accent2);}
+  .dot.bad{background:var(--danger);}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.5;}
+  .mapping{border:1px solid var(--border);border-radius:9px;padding:10px;margin-bottom:8px;background:#0f1014;}
+  .mapping .row{margin-bottom:6px;}
+  code{background:#0f1014;padding:1px 5px;border-radius:4px;}
+  a{color:var(--accent2);}
+  .footer-note{font-size:11px;color:var(--muted);margin-top:18px;text-align:center;}
+</style>
+</head>
+<body>
+
+<button id="toggleChrome" title="操作パネルの表示/非表示">⚙</button>
+
+<div id="overlay">
+  <div id="overlay-card"><span id="overlay-title"></span><span class="sub" id="overlay-sub"></span></div>
+</div>
+
+<div id="panel">
+  <h1>🟣 Twitch配信アシスタント <span style="color:var(--muted);font-weight:400;font-size:12px;">コメント読み上げ + チャンネルポイント演出</span></h1>
+
+  <section>
+    <div class="row" style="justify-content:space-between;">
+      <div class="row">
+        <span class="status"><span id="dotChat" class="dot"></span>チャット</span>
+        <span class="status"><span id="dotEvt" class="dot"></span>ポイント連動</span>
+        <span class="status"><span id="dotAuth" class="dot"></span>Twitch認証</span>
+      </div>
+      <div class="row">
+        <button id="btnStart" class="primary">開始</button>
+        <button id="btnStop">停止</button>
+      </div>
+    </div>
+    <div class="hint" id="logLine">待機中…</div>
+  </section>
+
+  <h2>基本設定</h2>
+  <section>
+    <label>配信チャンネル名（Twitchのログインid・小文字）</label>
+    <input type="text" id="channelLogin" placeholder="例: your_twitch_login">
+
+    <label>Twitch Client ID <span class="hint" style="margin:0;">（dev.twitch.tv で作成したアプリのID。既存の twitch-raid-tool アプリを使う場合はそれと同じIDでOK）</span></label>
+    <input type="text" id="clientId" placeholder="Client ID を入力">
+
+    <div class="row" style="margin-top:10px;">
+      <button id="btnLogin" class="primary">Twitchでログイン（チャンネルポイント連動に必要）</button>
+      <button id="btnLogout" class="danger small">ログアウト</button>
+    </div>
+    <div class="hint">
+      ログインはチャンネルポイント連動（演出発火）にのみ必要です。コメント読み上げだけ使う場合は不要です。<br>
+      ログイン前に、dev.twitch.tv のアプリ設定の「OAuth Redirect URLs」に、このページの実際のURL（<code id="curUrl"></code>）を追加登録しておいてください。
+    </div>
+  </section>
+
+  <h2>コメント読み上げ（棒読みちゃん連携）</h2>
+  <section>
+    <label><input type="checkbox" id="ttsEnabled" checked style="width:auto;margin-right:6px;"> 読み上げを有効にする</label>
+
+    <label>棒読みちゃん 連携ポート（棒読みちゃん側の「連携」タブで設定したポート番号）</label>
+    <input type="number" id="bouyomiPort" value="50001">
+
+    <label>無視するコマンド接頭辞（この文字で始まるコメントは読まない。カンマ区切り）</label>
+    <input type="text" id="ignorePrefix" value="!,/">
+
+    <label>無視するユーザー名（Bot等。カンマ区切り）</label>
+    <input type="text" id="ignoreUsers" value="nightbot,streamelements,streamlabs">
+
+    <label><input type="checkbox" id="readName" style="width:auto;margin-right:6px;"> 名前を読んでからコメントを読む（例:「○○さん、こんにちは」）</label>
+
+    <div class="row" style="margin-top:10px;">
+      <input type="text" id="testTtsText" placeholder="テスト読み上げテキスト" value="テスト読み上げです">
+      <button id="btnTestTts" class="small">テスト再生</button>
+    </div>
+    <div class="hint">
+      棒読みちゃんを起動し、「その他」→「連携設定」で HTTP連携（またはAPI/HTTP接続）をONにして、上のポート番号と一致させてください。同じPC上で棒読みちゃんが起動している必要があります。
+    </div>
+  </section>
+
+  <h2>チャンネルポイント演出</h2>
+  <section>
+    <div id="mappingList"></div>
+    <button id="btnAddMapping">＋ 演出を追加</button>
+    <div class="hint">
+      交換アイテム名（Twitchで設定した特典のタイトル）が一致したら、音を再生 / 画面に文字を表示します。
+      音声ファイルはブラウザを開き直すたびに再選択が必要です（ファイル自体はPCにあるものをそのまま使うため）。
+    </div>
+  </section>
+
+  <h2>OBSへの組み込み方</h2>
+  <section>
+    <div class="hint">
+      1. OBSで「ブラウザ」ソースを追加し、URLにこのページのURL（Twitchログイン後のURLをそのまま使うと認証保持が楽）を指定<br>
+      2. 幅・高さは配信解像度と同じに（背景は自動で透明になります）<br>
+      3. 右上の ⚙ ボタンで操作パネルを非表示にすると、視聴者には演出だけが見えます（設定は裏で動き続けます）<br>
+      4. 「OBSで音声を制御」にチェックを入れておくと演出の音が配信に乗ります
+    </div>
+  </section>
+
+  <div class="footer-note">このページは常駐サーバーを使わず、ブラウザ内のWebSocket接続のみで動作します（CPU負荷は最小限）。</div>
+</div>
+
+<audio id="sfxPlayer" style="display:none;"></audio>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- storage helpers ---------- */
+  const LS_KEY = "tsa_config_v1";
+  function loadCfg(){
+    try{ return JSON.parse(localStorage.getItem(LS_KEY)) || {}; }catch(e){ return {}; }
+  }
+  function saveCfg(patch){
+    const cur = loadCfg();
+    const next = Object.assign({}, cur, patch);
+    localStorage.setItem(LS_KEY, JSON.stringify(next));
+    return next;
+  }
+  let cfg = loadCfg();
+  if(!cfg.mappings) cfg.mappings = [];
+
+  /* ---------- UI refs ---------- */
+  const $ = (id)=>document.getElementById(id);
+  const elChannel = $("channelLogin"), elClientId = $("clientId");
+  const elTts = $("ttsEnabled"), elPort = $("bouyomiPort"), elIgnorePrefix = $("ignorePrefix"),
+        elIgnoreUsers = $("ignoreUsers"), elReadName = $("readName");
+  const dotChat = $("dotChat"), dotEvt = $("dotEvt"), dotAuth = $("dotAuth");
+  const logLine = $("logLine");
+
+  elChannel.value = cfg.channelLogin || "";
+  elClientId.value = cfg.clientId || "";
+  elTts.checked = cfg.ttsEnabled !== false;
+  elPort.value = cfg.bouyomiPort || 50001;
+  elIgnorePrefix.value = cfg.ignorePrefix || "!,/";
+  elIgnoreUsers.value = cfg.ignoreUsers || "nightbot,streamelements,streamlabs";
+  elReadName.checked = !!cfg.readName;
+  $("curUrl").textContent = location.origin + location.pathname;
+
+  [elChannel,elClientId,elIgnorePrefix,elIgnoreUsers,elPort].forEach(el=>{
+    el.addEventListener("change", persistBasic);
+  });
+  elTts.addEventListener("change", persistBasic);
+  elReadName.addEventListener("change", persistBasic);
+  function persistBasic(){
+    cfg = saveCfg({
+      channelLogin: elChannel.value.trim().toLowerCase(),
+      clientId: elClientId.value.trim(),
+      ttsEnabled: elTts.checked,
+      bouyomiPort: parseInt(elPort.value,10) || 50001,
+      ignorePrefix: elIgnorePrefix.value,
+      ignoreUsers: elIgnoreUsers.value,
+      readName: elReadName.checked,
+    });
+  }
+
+  function log(msg){
+    logLine.textContent = msg;
+    console.log("[TSA]", msg);
+  }
+
+  /* ---------- chrome (panel) visibility ---------- */
+  const CHROME_KEY = "tsa_chrome_visible";
+  function setChromeVisible(v){
+    document.body.classList.toggle("chrome-visible", v);
+    localStorage.setItem(CHROME_KEY, v ? "1":"0");
+  }
+  setChromeVisible(localStorage.getItem(CHROME_KEY) !== "0");
+  $("toggleChrome").addEventListener("click", ()=>{
+    setChromeVisible(!document.body.classList.contains("chrome-visible"));
+  });
+
+  /* ---------- overlay effect ---------- */
+  const overlayCard = $("overlay-card"), overlayTitle = $("overlay-title"), overlaySub = $("overlay-sub");
+  let overlayTimer = null;
+  function fireOverlay(title, sub, durationMs){
+    overlayTitle.textContent = title || "";
+    overlaySub.textContent = sub || "";
+    overlayCard.classList.add("show");
+    clearTimeout(overlayTimer);
+    overlayTimer = setTimeout(()=>{ overlayCard.classList.remove("show"); }, durationMs || 4000);
+  }
+
+  const sfxPlayer = $("sfxPlayer");
+  function fireSound(objectUrl, volume){
+    if(!objectUrl) return;
+    try{
+      sfxPlayer.src = objectUrl;
+      sfxPlayer.volume = (volume!=null)?volume:1;
+      sfxPlayer.currentTime = 0;
+      sfxPlayer.play().catch(()=>{});
+    }catch(e){}
+  }
+
+  /* ---------- reward mappings UI ---------- */
+  const mappingList = $("mappingList");
+  const mappingFiles = {}; // id -> ObjectURL (session only)
+
+  function renderMappings(){
+    mappingList.innerHTML = "";
+    cfg.mappings.forEach((m)=>{
+      const row = document.createElement("div");
+      row.className = "mapping";
+      row.innerHTML = `
+        <div class="row">
+          <input type="text" data-f="rewardTitle" placeholder="特典名（Twitchでの交換アイテム名と完全一致）" value="${escapeAttr(m.rewardTitle||"")}" style="flex:2;">
+          <button class="small danger" data-act="del">削除</button>
+        </div>
+        <div class="row">
+          <input type="text" data-f="overlayTitle" placeholder="画面に出す文字" value="${escapeAttr(m.overlayTitle||"")}" style="flex:1;">
+          <input type="number" data-f="durationSec" placeholder="表示秒数" value="${m.durationSec||4}" style="width:90px;">
+        </div>
+        <div class="row">
+          <input type="file" accept="audio/*" data-act="file">
+          <span class="hint" style="margin:0;">${m.fileName? "選択中: "+escapeAttr(m.fileName) : "未選択（開き直すたびに再選択が必要）"}</span>
+          <button class="small" data-act="testFire">テスト発火</button>
+        </div>
+      `;
+      row.querySelectorAll("input[data-f]").forEach(inp=>{
+        inp.addEventListener("change", ()=>{
+          m[inp.dataset.f] = inp.type==="number" ? (parseFloat(inp.value)||4) : inp.value;
+          cfg = saveCfg({mappings: cfg.mappings});
+        });
+      });
+      row.querySelector("[data-act=del]").addEventListener("click", ()=>{
+        cfg.mappings = cfg.mappings.filter(x=>x!==m);
+        cfg = saveCfg({mappings: cfg.mappings});
+        renderMappings();
+      });
+      row.querySelector("[data-act=file]").addEventListener("change", (e)=>{
+        const f = e.target.files[0];
+        if(!f) return;
+        const url = URL.createObjectURL(f);
+        mappingFiles[m.id] = url;
+        m.fileName = f.name;
+        cfg = saveCfg({mappings: cfg.mappings});
+        renderMappings();
+      });
+      row.querySelector("[data-act=testFire]").addEventListener("click", ()=>{
+        fireOverlay(m.overlayTitle || m.rewardTitle, "", (m.durationSec||4)*1000);
+        fireSound(mappingFiles[m.id]);
+      });
+      mappingList.appendChild(row);
+    });
+  }
+  function escapeAttr(s){ return String(s).replace(/"/g,"&quot;"); }
+
+  $("btnAddMapping").addEventListener("click", ()=>{
+    cfg.mappings.push({ id: "m"+Date.now()+Math.random().toString(36).slice(2), rewardTitle:"", overlayTitle:"", durationSec:4 });
+    cfg = saveCfg({mappings: cfg.mappings});
+    renderMappings();
+  });
+  renderMappings();
+
+  /* ---------- 棒読みちゃん TTS ---------- */
+  function speak(text){
+    if(!elTts.checked || !text) return;
+    const port = parseInt(elPort.value,10) || 50001;
+    const url = `http://127.0.0.1:${port}/talk?text=${encodeURIComponent(text)}`;
+    fetch(url, {mode:"no-cors"}).catch(()=>{});
+  }
+  $("btnTestTts").addEventListener("click", ()=> speak($("testTtsText").value));
+
+  /* ---------- Twitch OAuth (implicit grant) ---------- */
+  const TOKEN_KEY = "tsa_token_v1";
+  function getToken(){ try{ return JSON.parse(localStorage.getItem(TOKEN_KEY)); }catch(e){ return null; } }
+  function setToken(t){ localStorage.setItem(TOKEN_KEY, JSON.stringify(t)); updateAuthDot(); }
+  function clearToken(){ localStorage.removeItem(TOKEN_KEY); updateAuthDot(); }
+  function updateAuthDot(){
+    const t = getToken();
+    dotAuth.className = "dot" + (t && t.access_token ? " ok":"");
+  }
+
+  // parse token from redirect hash, if present
+  (function consumeHash(){
+    if(location.hash && location.hash.includes("access_token")){
+      const params = new URLSearchParams(location.hash.slice(1));
+      const access_token = params.get("access_token");
+      if(access_token){
+        setToken({access_token, obtained: Date.now()});
+        history.replaceState(null, "", location.pathname + location.search);
+        log("Twitch認証が完了しました");
+      }
+    }
+  })();
+  updateAuthDot();
+
+  $("btnLogin").addEventListener("click", ()=>{
+    const clientId = elClientId.value.trim();
+    if(!clientId){ alert("Client IDを入力してください"); return; }
+    persistBasic();
+    const redirect = location.origin + location.pathname;
+    const scope = "channel:read:redemptions";
+    const url = `https://id.twitch.tv/oauth2/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirect)}&response_type=token&scope=${encodeURIComponent(scope)}`;
+    location.href = url;
+  });
+  $("btnLogout").addEventListener("click", ()=>{
+    clearToken();
+    log("ログアウトしました");
+  });
+
+  /* ---------- Twitch chat (anonymous IRC over WebSocket) ---------- */
+  let chatWs = null, chatRetry = 0, running = false;
+  function connectChat(){
+    if(!running) return;
+    const channel = elChannel.value.trim().toLowerCase();
+    if(!channel){ log("チャンネル名が未設定です"); return; }
+    dotChat.className = "dot";
+    chatWs = new WebSocket("wss://irc-ws.chat.twitch.tv:443");
+    chatWs.onopen = ()=>{
+      const nick = "justinfan" + Math.floor(Math.random()*90000+10000);
+      chatWs.send("CAP REQ :twitch.tv/tags");
+      chatWs.send("PASS SCHMOOPIIE");
+      chatWs.send("NICK " + nick);
+      chatWs.send("JOIN #" + channel);
+    };
+    chatWs.onmessage = (ev)=>{
+      const lines = ev.data.split("\r\n").filter(Boolean);
+      for(const line of lines){
+        if(line.startsWith("PING")){ chatWs.send("PONG :tmi.twitch.tv"); continue; }
+        if(line.includes("PRIVMSG")){
+          handleChatLine(line);
+        }
+      }
+      dotChat.classList.add("ok");
+      chatRetry = 0;
+    };
+    chatWs.onclose = ()=>{
+      dotChat.className = "dot bad";
+      if(running){ chatRetry++; setTimeout(connectChat, Math.min(30000, 2000*chatRetry)); }
+    };
+    chatWs.onerror = ()=>{ try{chatWs.close();}catch(e){} };
+  }
+  function handleChatLine(line){
+    const tagEnd = line.startsWith("@") ? line.indexOf(" ") : -1;
+    const tagStr = tagEnd>0 ? line.slice(1,tagEnd) : "";
+    const rest = tagEnd>0 ? line.slice(tagEnd+1) : line;
+    const msgIdx = rest.indexOf(" :", rest.indexOf("PRIVMSG"));
+    if(msgIdx<0) return;
+    const text = rest.slice(msgIdx+2);
+    let displayName = "";
+    tagStr.split(";").forEach(kv=>{
+      const [k,v] = kv.split("=");
+      if(k==="display-name") displayName = v;
+    });
+    if(!displayName){
+      const m = rest.match(/^:([^!]+)!/);
+      displayName = m ? m[1] : "";
+    }
+    const ignoreUsers = elIgnoreUsers.value.toLowerCase().split(",").map(s=>s.trim()).filter(Boolean);
+    if(ignoreUsers.includes(displayName.toLowerCase())) return;
+    const prefixes = elIgnorePrefix.value.split(",").map(s=>s.trim()).filter(Boolean);
+    if(prefixes.some(p=>p && text.startsWith(p))) return;
+    const finalText = elReadName.checked ? `${displayName}さん、${text}` : text;
+    speak(finalText);
+  }
+
+  /* ---------- Twitch EventSub (channel point redemptions) ---------- */
+  let evtWs = null, evtRetry = 0, broadcasterId = null;
+  async function helix(path, opts){
+    const token = getToken();
+    const clientId = elClientId.value.trim();
+    if(!token || !clientId) throw new Error("no auth");
+    const res = await fetch("https://api.twitch.tv/helix" + path, Object.assign({
+      headers: {
+        "Authorization": "Bearer " + token.access_token,
+        "Client-Id": clientId,
+        "Content-Type": "application/json"
+      }
+    }, opts||{}));
+    if(res.status === 401){ clearToken(); throw new Error("token invalid"); }
+    return res.json();
+  }
+  async function ensureBroadcasterId(){
+    const channel = elChannel.value.trim().toLowerCase();
+    const data = await helix("/users?login=" + encodeURIComponent(channel));
+    if(data.data && data.data[0]) return data.data[0].id;
+    throw new Error("user not found");
+  }
+  function connectEventSub(){
+    if(!running) return;
+    const token = getToken();
+    if(!token || !token.access_token){ dotEvt.className="dot"; return; }
+    dotEvt.className = "dot";
+    evtWs = new WebSocket("wss://eventsub.wss.twitch.tv/ws");
+    evtWs.onmessage = async (ev)=>{
+      let msg;
+      try{ msg = JSON.parse(ev.data); }catch(e){ return; }
+      const type = msg.metadata && msg.metadata.message_type;
+      if(type === "session_welcome"){
+        const sessionId = msg.payload.session.id;
+        try{
+          if(!broadcasterId) broadcasterId = await ensureBroadcasterId();
+          await helix("/eventsub/subscriptions", {
+            method:"POST",
+            body: JSON.stringify({
+              type: "channel.channel_points_custom_reward_redemption.add",
+              version: "1",
+              condition: { broadcaster_user_id: broadcasterId },
+              transport: { method:"websocket", session_id: sessionId }
+            })
+          });
+          dotEvt.classList.add("ok");
+          log("チャンネルポイント連動: 購読完了");
+        }catch(e){
+          log("チャンネルポイント連動エラー: " + e.message);
+          dotEvt.className = "dot bad";
+        }
+      } else if(type === "notification"){
+        const event = msg.payload.event;
+        const title = (event.reward && event.reward.title) || "";
+        onRedemption(title, event.user_name);
+      } else if(type === "session_reconnect"){
+        try{ evtWs.close(); }catch(e){}
+      }
+    };
+    evtWs.onclose = ()=>{
+      dotEvt.className = "dot bad";
+      if(running){ evtRetry++; setTimeout(connectEventSub, Math.min(30000, 2000*evtRetry)); }
+    };
+    evtWs.onerror = ()=>{ try{evtWs.close();}catch(e){} };
+  }
+  function onRedemption(title, userName){
+    log(`ポイント交換: ${title} (${userName})`);
+    const norm = (title||"").trim().toLowerCase();
+    const m = cfg.mappings.find(x => (x.rewardTitle||"").trim().toLowerCase() === norm);
+    if(!m) return;
+    fireOverlay(m.overlayTitle || m.rewardTitle, userName||"", (m.durationSec||4)*1000);
+    fireSound(mappingFiles[m.id]);
+  }
+
+  /* ---------- start/stop ---------- */
+  $("btnStart").addEventListener("click", ()=>{
+    persistBasic();
+    running = true;
+    chatRetry = 0; evtRetry = 0;
+    connectChat();
+    connectEventSub();
+    log("開始しました");
+  });
+  $("btnStop").addEventListener("click", ()=>{
+    running = false;
+    if(chatWs) try{chatWs.close();}catch(e){}
+    if(evtWs) try{evtWs.close();}catch(e){}
+    dotChat.className="dot"; dotEvt.className="dot";
+    log("停止しました");
+  });
+
+})();
+</script>
+</body>
+</html>
