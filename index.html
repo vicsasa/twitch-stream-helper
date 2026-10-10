@@ -103,8 +103,8 @@
   <section>
     <label><input type="checkbox" id="ttsEnabled" checked style="width:auto;margin-right:6px;"> 読み上げを有効にする</label>
 
-    <label>棒読みちゃん 連携ポート（棒読みちゃん側の「連携」タブで設定したポート番号）</label>
-    <input type="number" id="bouyomiPort" value="50001">
+    <label>棒読みちゃん HTTPサーバーのポート（「その他」タブ→「連携」の「HTTPサーバー機能」のポート番号。Socket通信ポート(デフォルト50001)とは別物なので注意）</label>
+    <input type="number" id="bouyomiPort" value="50080">
 
     <label>無視するコマンド接頭辞（この文字で始まるコメントは読まない。カンマ区切り）</label>
     <input type="text" id="ignorePrefix" value="!,/">
@@ -177,7 +177,7 @@
   elChannel.value = cfg.channelLogin || "";
   elClientId.value = cfg.clientId || "";
   elTts.checked = cfg.ttsEnabled !== false;
-  elPort.value = cfg.bouyomiPort || 50001;
+  elPort.value = cfg.bouyomiPort || 50080;
   elIgnorePrefix.value = cfg.ignorePrefix || "!,/";
   elIgnoreUsers.value = cfg.ignoreUsers || "nightbot,streamelements,streamlabs";
   elReadName.checked = !!cfg.readName;
@@ -193,7 +193,7 @@
       channelLogin: elChannel.value.trim().toLowerCase(),
       clientId: elClientId.value.trim(),
       ttsEnabled: elTts.checked,
-      bouyomiPort: parseInt(elPort.value,10) || 50001,
+      bouyomiPort: parseInt(elPort.value,10) || 50080,
       ignorePrefix: elIgnorePrefix.value,
       ignoreUsers: elIgnoreUsers.value,
       readName: elReadName.checked,
@@ -301,9 +301,9 @@
   /* ---------- 棒読みちゃん TTS ---------- */
   function speak(text){
     if(!elTts.checked || !text) return;
-    const port = parseInt(elPort.value,10) || 50001;
-    const url = `http://127.0.0.1:${port}/talk?text=${encodeURIComponent(text)}`;
-    fetch(url, {mode:"no-cors"}).catch(()=>{});
+    const port = parseInt(elPort.value,10) || 50080;
+    const url = `http://localhost:${port}/Talk?text=${encodeURIComponent(text)}`;
+    fetch(url).catch(()=>{});
   }
   $("btnTestTts").addEventListener("click", ()=> speak($("testTtsText").value));
 
